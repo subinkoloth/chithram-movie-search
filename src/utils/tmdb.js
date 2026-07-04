@@ -1,5 +1,35 @@
-const API_KEY = '8265bd1679663a7ea12ac168da84d2e8';
 const BASE_URL = 'https://api.themoviedb.org/3';
+
+// Helper to determine URL and headers based on environment variables
+const getFetchOptionsAndUrl = (pathAndQuery) => {
+    const accessToken = import.meta.env.VITE_TMDB_ACCESS_TOKEN;
+    const apiKey = import.meta.env.VITE_TMDB_API_KEY || '8265bd1679663a7ea12ac168da84d2e8';
+
+    const separator = pathAndQuery.includes('?') ? '&' : '?';
+
+    // Check if user set the Access Token (ignoring default placeholder)
+    if (accessToken && accessToken !== 'your_token_here' && accessToken.trim() !== '') {
+        return {
+            url: `${BASE_URL}${pathAndQuery}`,
+            options: {
+                headers: {
+                    Authorization: `Bearer ${accessToken}`,
+                    accept: 'application/json'
+                }
+            }
+        };
+    } else {
+        return {
+            url: `${BASE_URL}${pathAndQuery}${separator}api_key=${apiKey}`,
+            options: {}
+        };
+    }
+};
+
+const tmdbFetch = async (pathAndQuery) => {
+    const { url, options } = getFetchOptionsAndUrl(pathAndQuery);
+    return fetch(url, options);
+};
 
 // Helper to format movie and tv results uniformly
 const formatMovies = (results) => {
@@ -22,14 +52,14 @@ const formatMovies = (results) => {
 
 export const searchMovies = async (query = '', page = 1) => {
     try {
-        const url = query.trim() 
-            ? `${BASE_URL}/search/multi?api_key=${API_KEY}&query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=${page}`
-            : `${BASE_URL}/trending/all/day?api_key=${API_KEY}&language=en-US&page=${page}`;
-            
-        const response = await fetch(url);
+        const path = query.trim()
+            ? `/search/multi?query=${encodeURIComponent(query)}&include_adult=false&language=en-US&page=${page}`
+            : `/trending/all/day?language=en-US&page=${page}`;
+
+        const response = await tmdbFetch(path);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const data = await response.json();
-        
+
         const searchResults = formatMovies(data.results || []);
 
         return {
@@ -47,11 +77,11 @@ export const getTrendingMovies = async () => {
     try {
         // Start all fetches in parallel
         const [res1, res2, res3] = await Promise.all([
-            fetch(`${BASE_URL}/trending/all/day?api_key=${API_KEY}&language=en-US`),
-            fetch(`${BASE_URL}/discover/movie?api_key=${API_KEY}&with_original_language=ml&sort_by=popularity.desc&include_adult=false`),
-            fetch(`${BASE_URL}/discover/tv?api_key=${API_KEY}&with_original_language=ml&sort_by=popularity.desc&include_adult=false`)
+            tmdbFetch(`/trending/all/day?language=en-US`),
+            tmdbFetch(`/discover/movie?with_original_language=ml&sort_by=popularity.desc&include_adult=false`),
+            tmdbFetch(`/discover/tv?with_original_language=ml&sort_by=popularity.desc&include_adult=false`)
         ]);
-        
+
         // Convert all responses to JSON in parallel
         const [data1, data2, data3] = await Promise.all([
             res1.ok ? res1.json() : { results: [] },
@@ -75,18 +105,18 @@ export const getTrendingMovies = async () => {
 export const getMoviesByLanguage = async (languageCode, page = 1) => {
     try {
         const [resMovie, resTv] = await Promise.all([
-            fetch(`${BASE_URL}/discover/movie?api_key=${API_KEY}&with_original_language=${languageCode}&sort_by=popularity.desc&include_adult=false&language=en-US&page=${page}`),
-            fetch(`${BASE_URL}/discover/tv?api_key=${API_KEY}&with_original_language=${languageCode}&sort_by=popularity.desc&include_adult=false&language=en-US&page=${page}`)
+            tmdbFetch(`/discover/movie?with_original_language=${languageCode}&sort_by=popularity.desc&include_adult=false&language=en-US&page=${page}`),
+            tmdbFetch(`/discover/tv?with_original_language=${languageCode}&sort_by=popularity.desc&include_adult=false&language=en-US&page=${page}`)
         ]);
-        
+
         const [dataMovie, dataTv] = await Promise.all([
             resMovie.ok ? resMovie.json() : { results: [] },
             resTv.ok ? resTv.json() : { results: [] }
         ]);
-        
+
         const combined = [...(dataMovie.results || []), ...(dataTv.results || [])]
             .sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-        
+
         const searchResults = formatMovies(combined);
 
         return {
@@ -104,18 +134,18 @@ export const getMoviesByGenre = async (genreId, page = 1) => {
     try {
         // We will fetch both since genre IDs overlap for many categories
         const [resMovie, resTv] = await Promise.all([
-            fetch(`${BASE_URL}/discover/movie?api_key=${API_KEY}&with_genres=${genreId}&include_adult=false&language=en-US&page=${page}`),
-            fetch(`${BASE_URL}/discover/tv?api_key=${API_KEY}&with_genres=${genreId}&include_adult=false&language=en-US&page=${page}`)
+            tmdbFetch(`/discover/movie?with_genres=${genreId}&include_adult=false&language=en-US&page=${page}`),
+            tmdbFetch(`/discover/tv?with_genres=${genreId}&include_adult=false&language=en-US&page=${page}`)
         ]);
-        
+
         const [dataMovie, dataTv] = await Promise.all([
             resMovie.ok ? resMovie.json() : { results: [] },
             resTv.ok ? resTv.json() : { results: [] }
         ]);
-        
+
         const combined = [...(dataMovie.results || []), ...(dataTv.results || [])]
             .sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-            
+
         const searchResults = formatMovies(combined);
 
         return {
@@ -133,40 +163,40 @@ export const getMovieDetails = async (id) => {
     try {
         let type = 'movie';
         let realId = id;
-        
+
         if (id && (id.startsWith('tv_') || id.startsWith('movie_'))) {
             [type, realId] = id.split('_');
         }
 
-        const response = await fetch(`${BASE_URL}/${type}/${realId}?api_key=${API_KEY}&append_to_response=credits&language=en-US`);
+        const response = await tmdbFetch(`/${type}/${realId}?append_to_response=credits&language=en-US`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const movie = await response.json();
 
         let director = 'N/A';
         let writer = 'N/A';
         let actors = 'N/A';
-        
+
         if (movie.created_by && movie.created_by.length > 0) {
             director = movie.created_by.map(c => c.name).join(', ');
         }
-        
+
         if (movie.credits) {
             const crew = movie.credits.crew || [];
             const cast = movie.credits.cast || [];
-            
+
             if (director === 'N/A') {
                 const directorObj = crew.find(c => c.job === 'Director');
                 if (directorObj) director = directorObj.name;
             }
-            
+
             const writerObj = crew.find(c => c.department === 'Writing' || c.job === 'Screenplay' || c.job === 'Writer');
             if (writerObj) writer = writerObj.name;
-            
+
             actors = cast.slice(0, 4).map(a => a.name).join(', ') || 'N/A';
         }
 
-        const runtime = movie.runtime 
-            ? `${movie.runtime} min` 
+        const runtime = movie.runtime
+            ? `${movie.runtime} min`
             : (movie.episode_run_time && movie.episode_run_time.length > 0 ? `${movie.episode_run_time[0]} min` : 'N/A');
 
         return {
